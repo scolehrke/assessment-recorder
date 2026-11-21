@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recorder connection test</title>
+</head>
+<body>
+  <button id="send" type="button">Send test message</button>
+  <p id="status" role="status"></p>
+
+  <script>
+    const params = new URLSearchParams(location.hash.slice(1));
+    const appOrigin = params.get('appOrigin');
+    const testId = params.get('testId');
+    const status = document.getElementById('status');
+
+    document.getElementById('send').addEventListener('click', () => {
+      if (!window.opener || !appOrigin || !testId) {
+        status.textContent = 'Open this page using the test button in step 3.';
+        return;
+      }
+
+      window.opener.postMessage({ type: 'recorder-test', testId }, appOrigin);
+      status.textContent = 'Message sent. Check the assessment tab.';
+    });
+  </script>
+</body>
+</html>
