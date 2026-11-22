@@ -4,6 +4,23 @@
   <meta charset="utf-8">
   <title>Recorder connection test</title>
 </head>
+  <button type="button" id="test-mic">Test microphone</button>
+<p id="mic-test-status" role="status"></p>
+
+<script>
+  document.getElementById('test-mic').addEventListener('click', async () => {
+    const status = document.getElementById('mic-test-status');
+    status.textContent = 'Waiting for microphone permission…';
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+      status.textContent = 'Microphone access works.';
+    } catch (error) {
+      status.textContent = `${error.name}: ${error.message}`;
+    }
+  });
+</script>
 <body>
   <button id="send" type="button">Send test message</button>
   <p id="status" role="status"></p>
