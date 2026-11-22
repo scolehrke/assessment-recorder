@@ -19,109 +19,159 @@
   <p id="timer" aria-label="Recording duration">0:00</p>
   <audio id="preview" controls hidden></audio>
   <button id="send" type="button" disabled>Use clip</button>
-  <p id="status" role="status"></p>
+  <p id="status" role="status">Waiting for the recorder script to load…</p>
   <script>
-    const params = new URLSearchParams(location.hash.slice(1));
-    const appOrigin = params.get('appOrigin');
-    const recordingId = params.get('recordingId');
-    const openerWindow = window.opener;
-    const start = document.getElementById('start');
-    const pause = document.getElementById('pause');
-    const stop = document.getElementById('stop');
-    const timer = document.getElementById('timer');
-    const preview = document.getElementById('preview');
-    const send = document.getElementById('send');
-    const status = document.getElementById('status');
-    const connected = openerWindow && /^https:\/\/[^/]+$/.test(appOrigin || '') && recordingId;
-    let clip;
-    let previewUrl;
-    let stream;
-    let recorder;
-    let saving = false;
-    let retryOnly = false;
-    let seconds = 0;
-    let timerId;
+    (() => {
+      const params = new URLSearchParams(location.hash.slice(1));
+      const appOrigin = params.get('appOrigin');
+      const recordingId = params.get('recordingId');
+      const openerWindow = window.opener;
+      const start = document.getElementById('start');
+      const pause = document.getElementById('pause');
+      const stop = document.getElementById('stop');
+      const timer = document.getElementById('timer');
+      const preview = document.getElementById('preview');
+      const send = document.getElementById('send');
+      const status = document.getElementById('status');
+      const connected = openerWindow && /^https:\/\/[^/]+$/.test(appOrigin || '') && recordingId;
+      let clip;
+      let previewUrl;
+      let stream;
+      let recorder;
+      let saving = false;
+      let retryOnly = false;
+      let seconds = 0;
+      let timerId;
 
-    start.disabled = !connected;
-    status.textContent = connected ? 'Ready to record.' : 'Open this recorder using Record in Live Scoring.';
-
-    function releaseMicrophone() {
-      stream?.getTracks().forEach(track => track.stop());
-      clearInterval(timerId);
-      pause.disabled = true;
-      pause.textContent = 'Pause';
-      stop.disabled = true;
-    }
-
-    start.addEventListener('click', async () => {
-      if (clip && !confirm('Discard the current clip and record a new take?')) return;
-      start.disabled = true;
-      send.disabled = true;
-      try {
-        status.textContent = 'Waiting for microphone access…';
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        if (openerWindow.closed) throw new Error('The Live Scoring window is closed.');
-        const format = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(
-          type => MediaRecorder.isTypeSupported(type)
-        );
-        recorder = new MediaRecorder(stream, format ? { mimeType: format } : undefined);
-        const chunks = [];
-        let failed = false;
-        recorder.addEventListener('dataavailable', event => {
-          if (event.data.size) chunks.push(event.data);
-        });
-        recorder.addEventListener('error', () => {
-          failed = true;
-          releaseMicrophone();
-          start.disabled = false;
-          status.textContent = 'Recording failed. Start a new take.';
-        });
-        recorder.addEventListener('stop', () => {
-          releaseMicrophone();
-          start.disabled = false;
-          if (failed) return;
-          clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
-          if (!clip.size) {
-            status.textContent = 'The recording was empty. Try another take.';
-            return;
-          }
-          previewUrl = URL.createObjectURL(clip);
-          preview.src = previewUrl;
-          preview.hidden = false;
-          send.disabled = false;
-          status.textContent = 'Listen to the preview, then click Use clip.';
-        });
-        recorder.start();
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        preview.removeAttribute('src');
-        preview.hidden = true;
-        clip = null;
-        pause.disabled = false;
-        stop.disabled = false;
-        status.textContent = 'Recording…';
-        seconds = 0;
-        timer.textContent = '0:00';
-        timerId = setInterval(() => {
-          if (recorder.state !== 'recording') return;
-          seconds++;
-          timer.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
-        }, 1000);
-      } catch (error) {
-        releaseMicrophone();
-        start.disabled = false;
-        send.disabled = !clip;
-        status.textContent = error.message;
+      start.disabled = !connected;
+      if (connected) {
+        status.textContent = 'Ready to record.';
+      } else if (!openerWindow) {
+        status.textContent = 'The recorder has no connection to Live Scoring. Close it and click Record in the app.';
+      } else {
+        status.textContent = 'Recording details are missing. Close this window and reopen it from Record in Live Scoring.';
       }
-    });
 
-    pause.addEventListener('click', () => {
-      if (recorder.state === 'recording') {
-        recorder.pause();
-        pause.textContent = 'Resume';
-        status.textContent = 'Paused.';
-      } else if (recorder.state === 'paused') {
-        recorder.resume();
+      function releaseMicrophone() {
+        stream?.getTracks().forEach(track => track.stop());
+        clearInterval(timerId);
+        pause.disabled = true;
         pause.textContent = 'Pause';
-        status.textContent = 'Recording…';
+        stop.disabled = true;
       }
-    });
+
+      start.addEventListener('click', async () => {
+        if (clip && !confirm('Discard the current clip and record a new take?')) return;
+        start.disabled = true;
+        send.disabled = true;
+        try {
+          status.textContent = 'Waiting for microphone access…';
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (openerWindow.closed) throw new Error('The Live Scoring window is closed.');
+          const format = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(
+            type => MediaRecorder.isTypeSupported(type)
+          );
+          recorder = new MediaRecorder(stream, format ? { mimeType: format } : undefined);
+          const chunks = [];
+          let failed = false;
+          recorder.addEventListener('dataavailable', event => {
+            if (event.data.size) chunks.push(event.data);
+          });
+          recorder.addEventListener('error', () => {
+            failed = true;
+            releaseMicrophone();
+            start.disabled = false;
+            status.textContent = 'Recording failed. Start a new take.';
+          });
+          recorder.addEventListener('stop', () => {
+            releaseMicrophone();
+            start.disabled = false;
+            if (failed) return;
+            clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
+            if (!clip.size) {
+              status.textContent = 'The recording was empty. Try another take.';
+              return;
+            }
+            previewUrl = URL.createObjectURL(clip);
+            preview.src = previewUrl;
+            preview.hidden = false;
+            send.disabled = false;
+            status.textContent = 'Listen to the preview, then click Use clip.';
+          });
+          recorder.start();
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          preview.removeAttribute('src');
+          preview.hidden = true;
+          clip = null;
+          pause.disabled = false;
+          stop.disabled = false;
+          status.textContent = 'Recording…';
+          seconds = 0;
+          timer.textContent = '0:00';
+          timerId = setInterval(() => {
+            if (recorder.state !== 'recording') return;
+            seconds++;
+            timer.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+          }, 1000);
+        } catch (error) {
+          releaseMicrophone();
+          start.disabled = false;
+          send.disabled = !clip;
+          status.textContent = error.message;
+        }
+      });
+
+      pause.addEventListener('click', () => {
+        if (recorder.state === 'recording') {
+          recorder.pause();
+          pause.textContent = 'Resume';
+          status.textContent = 'Paused.';
+        } else if (recorder.state === 'paused') {
+          recorder.resume();
+          pause.textContent = 'Pause';
+          status.textContent = 'Recording…';
+        }
+      });
+
+      stop.addEventListener('click', () => {
+        stop.disabled = true;
+        pause.disabled = true;
+        recorder.stop();
+      });
+
+      send.addEventListener('click', () => {
+        if (!clip || saving) return;
+        if (openerWindow.closed) {
+          status.textContent = 'Live Scoring was closed. Keep this window open to play the clip.';
+          return;
+        }
+        saving = true;
+        start.disabled = true;
+        send.disabled = true;
+        status.textContent = 'Saving to Drive…';
+        openerWindow.postMessage({ type: 'group-audio', recordingId, clip }, appOrigin);
+      });
+
+      window.addEventListener('message', event => {
+        if (event.origin !== appOrigin || event.source !== openerWindow ||
+            event.data?.type !== 'group-audio-result' || event.data.recordingId !== recordingId) return;
+        saving = false;
+        if (event.data.error) {
+          retryOnly = true;
+          send.disabled = false;
+          send.textContent = 'Retry save';
+          status.textContent = event.data.error;
+          return;
+        }
+        retryOnly = false;
+        status.textContent = 'Saved to Drive. You can close this window.';
+      });
+
+      window.addEventListener('beforeunload', event => {
+        if (saving || retryOnly) event.preventDefault();
+      });
+      window.addEventListener('pagehide', releaseMicrophone);
+    })();
+  </script>
+</body>
+</html>
