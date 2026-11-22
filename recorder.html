@@ -2,44 +2,126 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Recorder connection test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Group audio recorder</title>
+  <style>
+    body { font: 1rem system-ui, sans-serif; margin: 2rem; color: #172334; }
+    button { font: inherit; padding: .5rem .8rem; margin: 0 .25rem .5rem 0; }
+    audio { display: block; max-width: 100%; margin: 1rem 0; }
+    audio[hidden] { display: none; }
+  </style>
 </head>
-  <button type="button" id="test-mic">Test microphone</button>
-<p id="mic-test-status" role="status"></p>
-
-<script>
-  document.getElementById('test-mic').addEventListener('click', async () => {
-    const status = document.getElementById('mic-test-status');
-    status.textContent = 'Waiting for microphone permission…';
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop());
-      status.textContent = 'Microphone access works.';
-    } catch (error) {
-      status.textContent = `${error.name}: ${error.message}`;
-    }
-  });
-</script>
 <body>
-  <button id="send" type="button">Send test message</button>
+  <h1>Group audio recorder</h1>
+  <button id="start" type="button" disabled>Start</button>
+  <button id="pause" type="button" disabled>Pause</button>
+  <button id="stop" type="button" disabled>Stop</button>
+  <p id="timer" aria-label="Recording duration">0:00</p>
+  <audio id="preview" controls hidden></audio>
+  <button id="send" type="button" disabled>Use clip</button>
   <p id="status" role="status"></p>
-
   <script>
     const params = new URLSearchParams(location.hash.slice(1));
     const appOrigin = params.get('appOrigin');
-    const testId = params.get('testId');
+    const recordingId = params.get('recordingId');
+    const openerWindow = window.opener;
+    const start = document.getElementById('start');
+    const pause = document.getElementById('pause');
+    const stop = document.getElementById('stop');
+    const timer = document.getElementById('timer');
+    const preview = document.getElementById('preview');
+    const send = document.getElementById('send');
     const status = document.getElementById('status');
+    const connected = openerWindow && /^https:\/\/[^/]+$/.test(appOrigin || '') && recordingId;
+    let clip;
+    let previewUrl;
+    let stream;
+    let recorder;
+    let saving = false;
+    let retryOnly = false;
+    let seconds = 0;
+    let timerId;
 
-    document.getElementById('send').addEventListener('click', () => {
-      if (!window.opener || !appOrigin || !testId) {
-        status.textContent = 'Open this page using the test button in step 3.';
-        return;
+    start.disabled = !connected;
+    status.textContent = connected ? 'Ready to record.' : 'Open this recorder using Record in Live Scoring.';
+
+    function releaseMicrophone() {
+      stream?.getTracks().forEach(track => track.stop());
+      clearInterval(timerId);
+      pause.disabled = true;
+      pause.textContent = 'Pause';
+      stop.disabled = true;
+    }
+
+    start.addEventListener('click', async () => {
+      if (clip && !confirm('Discard the current clip and record a new take?')) return;
+      start.disabled = true;
+      send.disabled = true;
+      try {
+        status.textContent = 'Waiting for microphone access…';
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (openerWindow.closed) throw new Error('The Live Scoring window is closed.');
+        const format = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(
+          type => MediaRecorder.isTypeSupported(type)
+        );
+        recorder = new MediaRecorder(stream, format ? { mimeType: format } : undefined);
+        const chunks = [];
+        let failed = false;
+        recorder.addEventListener('dataavailable', event => {
+          if (event.data.size) chunks.push(event.data);
+        });
+        recorder.addEventListener('error', () => {
+          failed = true;
+          releaseMicrophone();
+          start.disabled = false;
+          status.textContent = 'Recording failed. Start a new take.';
+        });
+        recorder.addEventListener('stop', () => {
+          releaseMicrophone();
+          start.disabled = false;
+          if (failed) return;
+          clip = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
+          if (!clip.size) {
+            status.textContent = 'The recording was empty. Try another take.';
+            return;
+          }
+          previewUrl = URL.createObjectURL(clip);
+          preview.src = previewUrl;
+          preview.hidden = false;
+          send.disabled = false;
+          status.textContent = 'Listen to the preview, then click Use clip.';
+        });
+        recorder.start();
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        preview.removeAttribute('src');
+        preview.hidden = true;
+        clip = null;
+        pause.disabled = false;
+        stop.disabled = false;
+        status.textContent = 'Recording…';
+        seconds = 0;
+        timer.textContent = '0:00';
+        timerId = setInterval(() => {
+          if (recorder.state !== 'recording') return;
+          seconds++;
+          timer.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+        }, 1000);
+      } catch (error) {
+        releaseMicrophone();
+        start.disabled = false;
+        send.disabled = !clip;
+        status.textContent = error.message;
       }
-
-      window.opener.postMessage({ type: 'recorder-test', testId }, appOrigin);
-      status.textContent = 'Message sent. Check the assessment tab.';
     });
-  </script>
-</body>
-</html>
+
+    pause.addEventListener('click', () => {
+      if (recorder.state === 'recording') {
+        recorder.pause();
+        pause.textContent = 'Resume';
+        status.textContent = 'Paused.';
+      } else if (recorder.state === 'paused') {
+        recorder.resume();
+        pause.textContent = 'Pause';
+        status.textContent = 'Recording…';
+      }
+    });
